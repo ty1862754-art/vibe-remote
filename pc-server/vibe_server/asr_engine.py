@@ -165,7 +165,7 @@ class SenseVoiceAsrEngine:
 
         stream = self._recognizer.create_stream()
         stream.accept_waveform(sample_rate, samples)
-        self._recognizer.decode(stream)
+        self._recognizer.decode_stream(stream)
         raw_text = str(stream.result.text).strip()
         final_text = apply_hotwords(raw_text, self.asr_cfg.hotwords)
 

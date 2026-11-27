@@ -6,8 +6,8 @@ import sys
 import numpy as np
 from fastapi.testclient import TestClient
 
-from vibe_server.asr_engine import pcm16_bytes_to_float32
-from vibe_server.config import AppConfig, ServerConfig, apply_hotwords
+from vibe_server.asr_engine import SenseVoiceAsrEngine, pcm16_bytes_to_float32
+from vibe_server.config import AppConfig, AsrConfig, LlmPolishConfig, ServerConfig, apply_hotwords
 from vibe_server.main import build_pair_uri, create_app
 from vibe_server.protocol import UdpMousePacket, parse_udp_packet
 from vibe_server.win_input import INPUT, resolve_vk
@@ -81,3 +81,40 @@ def test_pair_uri_and_websocket_auth() -> None:
             ws.send_json({"type": "ping"})
             pong = ws.receive_json()
             assert pong["type"] == "pong"
+
+
+def test_sherpa_onnx_decode_stream_api() -> None:
+    import sherpa_onnx
+
+    assert hasattr(sherpa_onnx.OfflineRecognizer, "from_sense_voice")
+    assert hasattr(sherpa_onnx.OfflineRecognizer, "create_stream")
+    assert hasattr(sherpa_onnx.OfflineRecognizer, "decode_stream")
+
+    class _FakeResult:
+        text = "帮我修一下巴格"
+
+    class _FakeStream:
+        def __init__(self) -> None:
+            self.result = _FakeResult()
+            self.received = None
+
+        def accept_waveform(self, sr: int, samples: np.ndarray) -> None:
+            self.received = (sr, len(samples))
+
+    class _FakeRecognizer:
+        def create_stream(self) -> _FakeStream:
+            return _FakeStream()
+
+        def decode_stream(self, stream: _FakeStream) -> None:
+            assert stream.received is not None
+
+    engine = SenseVoiceAsrEngine(AsrConfig(), LlmPolishConfig())
+    engine._recognizer = _FakeRecognizer()
+    engine._ready = True
+
+    # 0.25s of 16kHz PCM16 silence
+    pcm = np.zeros(4000, dtype="<i2").tobytes()
+    res = engine.transcribe_pcm16(pcm, sample_rate=16000)
+    assert res.raw_text == "帮我修一下巴格"
+    assert res.final_text == "帮我修一下bug"
+
