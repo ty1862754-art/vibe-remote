@@ -266,18 +266,41 @@ class RemoteClient(
         }
     }
 
+    fun ensureAlive() {
+        val cfg = activeConfig ?: return
+        if (manualDisconnect || !cfg.isValid) return
+        scope.launch(Dispatchers.IO) {
+            if (udpSocket == null || udpSocket?.isClosed == true) {
+                cachedUdpAddress = runCatching { InetAddress.getByName(cfg.host) }.getOrNull()
+                udpSocket = runCatching { DatagramSocket() }.getOrNull()
+            }
+        }
+        if (_status.value.connectionState == ConnectionState.DISCONNECTED) {
+            openWebSocket(cfg)
+        }
+    }
+
     private fun sendUdpOrFallback(payload: String, fallback: () -> Unit) {
         val cfg = activeConfig ?: return
         val sock = udpSocket
         val addr = cachedUdpAddress
         if (sock == null || addr == null || sock.isClosed) {
             fallback()
+            scope.launch(Dispatchers.IO) {
+                cachedUdpAddress = runCatching { InetAddress.getByName(cfg.host) }.getOrNull()
+                udpSocket = runCatching { DatagramSocket() }.getOrNull()
+            }
             return
         }
         scope.launch(Dispatchers.IO) {
-            runCatching {
+            val result = runCatching {
                 val bytes = payload.toByteArray(Charsets.UTF_8)
                 sock.send(DatagramPacket(bytes, bytes.size, addr, cfg.udpPort))
+            }
+            if (result.isFailure) {
+                runCatching { sock.close() }
+                udpSocket = runCatching { DatagramSocket() }.getOrNull()
+                fallback()
             }
         }
     }

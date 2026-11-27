@@ -3,11 +3,14 @@ from __future__ import annotations
 import ctypes
 import logging
 import os
+import subprocess
 import sys
 import threading
 import webbrowser
 from pathlib import Path
 from typing import Callable
+
+from .win_input import is_admin
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +59,25 @@ def build_autostart_command() -> str:
     pc_server_dir = Path(__file__).resolve().parent.parent
     run_script = pc_server_dir / "run_server.py"
     return f'"{Path(sys.executable).resolve()}" "{run_script}" --minimized'
+
+
+def relaunch_as_admin() -> bool:
+    """Relaunch the current server elevated via Windows UAC so it can control Admin windows."""
+    if not IS_WINDOWS:
+        return False
+    try:
+        if getattr(sys, "frozen", False):
+            exe = str(Path(sys.executable).resolve())
+            params = " ".join(subprocess.list2cmdline([a]) for a in sys.argv[1:])
+        else:
+            exe = str(Path(sys.executable).resolve())
+            run_script = str(Path(__file__).resolve().parent.parent / "run_server.py")
+            params = subprocess.list2cmdline([run_script, *sys.argv[1:]])
+        ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, None, SW_SHOW)
+        return int(ret) > 32
+    except Exception as exc:
+        logger.warning("请求管理员权限重启失败: %s", exc)
+        return False
 
 
 def is_autostart_enabled() -> bool:
@@ -159,12 +181,18 @@ class SystemTrayController:
         def toggle_autostart(icon, item) -> None:
             set_autostart_enabled(not is_autostart_enabled())
 
+        def handle_elevate(icon, item) -> None:
+            if relaunch_as_admin():
+                icon.stop()
+                self.on_quit()
+
         def handle_quit(icon, item) -> None:
             icon.stop()
             self.on_quit()
 
-        menu = pystray.Menu(
-            pystray.MenuItem(f"VibeRemote ({self.display_endpoint})", None, enabled=False),
+        admin_tag = " [管理员]" if is_admin() else " [普通权限]"
+        menu_items = [
+            pystray.MenuItem(f"VibeRemote ({self.display_endpoint}){admin_tag}", None, enabled=False),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("打开扫码配对页", open_pair, default=True),
             pystray.MenuItem(
@@ -177,9 +205,14 @@ class SystemTrayController:
                 toggle_autostart,
                 checked=lambda item: is_autostart_enabled(),
             ),
+        ]
+        if not is_admin():
+            menu_items.append(pystray.MenuItem("以管理员权限重启（控制所有窗口）", handle_elevate))
+        menu_items.extend([
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("退出 VibeRemote", handle_quit),
-        )
+        ])
+        menu = pystray.Menu(*menu_items)
 
         try:
             self._icon = pystray.Icon("VibeRemote", _create_tray_image(), "VibeRemote 控制器", menu)

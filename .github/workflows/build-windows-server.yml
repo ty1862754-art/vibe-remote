@@ -60,6 +60,7 @@ jobs:
         run: |
           Copy-Item config.example.toml dist/VibeRemoteServer/
           Copy-Item 放行防火墙.bat dist/VibeRemoteServer/
+          Copy-Item 以管理员启动.bat dist/VibeRemoteServer/
           Compress-Archive -Path dist/VibeRemoteServer/* -DestinationPath VibeRemote-Windows-Portable.zip -Force
 
       - name: Upload Windows Portable Artifact

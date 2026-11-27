@@ -80,68 +80,78 @@ fun TouchpadSurface(
                         lastPositions[ch.id.value] = ch.position
                     }
 
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val pressedChanges = event.changes.filter { it.pressed }
-                        val pressedCount = pressedChanges.size
-                        if (pressedCount > maxPointers) {
-                            maxPointers = pressedCount
-                        }
-
-                        if (pressedCount == 1 && maxPointers == 1) {
-                            val ch = pressedChanges[0]
-                            val prev = lastPositions[ch.id.value] ?: ch.position
-                            val delta = ch.position - prev
-                            lastPositions[ch.id.value] = ch.position
-                            val dist = hypot(delta.x, delta.y)
-                            if (dist > 0.1f) {
-                                totalDistance += dist
-                                // Gentle pointer acceleration: slow = pixel precise, fast = wide travel
-                                val accel = 1f + (dist / 18f).coerceAtMost(2.2f).pow(1.15f) * 0.55f
-                                val scale = currentSensitivity * accel
-                                currentOnMove(delta.x * scale, delta.y * scale)
-                                ch.consume()
+                    var finishedCleanly = false
+                    try {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val pressedChanges = event.changes.filter { it.pressed }
+                            val pressedCount = pressedChanges.size
+                            if (pressedCount > maxPointers) {
+                                maxPointers = pressedCount
                             }
-                        } else if (pressedCount == 2) {
-                            var sumDx = 0f
-                            var sumDy = 0f
-                            var counted = 0
-                            for (ch in pressedChanges) {
-                                val prev = lastPositions[ch.id.value]
+
+                            if (pressedCount == 1 && maxPointers == 1) {
+                                val ch = pressedChanges[0]
+                                val prev = lastPositions[ch.id.value] ?: ch.position
+                                val delta = ch.position - prev
                                 lastPositions[ch.id.value] = ch.position
-                                if (prev != null) {
-                                    sumDx += ch.position.x - prev.x
-                                    sumDy += ch.position.y - prev.y
-                                    counted++
+                                val dist = hypot(delta.x, delta.y)
+                                if (dist > 0.1f) {
+                                    totalDistance += dist
+                                    // Gentle pointer acceleration: slow = pixel precise, fast = wide travel
+                                    val accel = 1f + (dist / 18f).coerceAtMost(2.2f).pow(1.15f) * 0.55f
+                                    val scale = currentSensitivity * accel
+                                    currentOnMove(delta.x * scale, delta.y * scale)
+                                    ch.consume()
                                 }
-                                ch.consume()
+                            } else if (pressedCount == 2) {
+                                var sumDx = 0f
+                                var sumDy = 0f
+                                var counted = 0
+                                for (ch in pressedChanges) {
+                                    val prev = lastPositions[ch.id.value]
+                                    lastPositions[ch.id.value] = ch.position
+                                    if (prev != null) {
+                                        sumDx += ch.position.x - prev.x
+                                        sumDy += ch.position.y - prev.y
+                                        counted++
+                                    }
+                                    ch.consume()
+                                }
+                                if (counted > 0) {
+                                    val avgDx = sumDx / counted
+                                    val avgDy = sumDy / counted
+                                    totalDistance += hypot(avgDx, avgDy)
+                                    // Windows wheel: positive = scroll up, negative = scroll down
+                                    val scrollSign = if (currentNaturalScroll) 1f else -1f
+                                    currentOnScroll(avgDx * 3.5f * scrollSign, avgDy * 4.5f * scrollSign)
+                                }
+                            } else {
+                                pressedChanges.forEach { ch ->
+                                    lastPositions[ch.id.value] = ch.position
+                                }
                             }
-                            if (counted > 0) {
-                                val avgDx = sumDx / counted
-                                val avgDy = sumDy / counted
-                                totalDistance += hypot(avgDx, avgDy)
-                                // Windows wheel: positive = scroll up, negative = scroll down
-                                val scrollSign = if (currentNaturalScroll) 1f else -1f
-                                currentOnScroll(avgDx * 3.5f * scrollSign, avgDy * 4.5f * scrollSign)
-                            }
-                        } else {
-                            pressedChanges.forEach { ch ->
-                                lastPositions[ch.id.value] = ch.position
-                            }
-                        }
 
-                        if (pressedCount == 0) {
-                            break
+                            if (pressedCount == 0) {
+                                finishedCleanly = true
+                                break
+                            }
                         }
+                    } finally {
+                        if (isDragging) {
+                            currentOnClick("left", "up")
+                            lastTapUpTime = 0L
+                        }
+                    }
+
+                    if (!finishedCleanly || isDragging) {
+                        return@awaitEachGesture
                     }
 
                     val upTime = System.currentTimeMillis()
                     val duration = upTime - downTime
 
-                    if (isDragging) {
-                        currentOnClick("left", "up")
-                        lastTapUpTime = 0L
-                    } else if (duration < 230L && totalDistance < 22f) {
+                    if (duration < 230L && totalDistance < 22f) {
                         when (maxPointers) {
                             1 -> {
                                 currentOnClick("left", "click")

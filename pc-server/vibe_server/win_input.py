@@ -11,6 +11,16 @@ logger = logging.getLogger(__name__)
 
 IS_WINDOWS = sys.platform == "win32"
 
+
+def is_admin() -> bool:
+    """Return True if the current Windows process is running with Administrator privileges."""
+    if not IS_WINDOWS:
+        return True
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
 # SendInput constants
 INPUT_MOUSE = 0
 INPUT_KEYBOARD = 1
@@ -152,6 +162,8 @@ class WindowsInputController:
         self._scroll_rem_x = 0.0
         self._scroll_rem_y = 0.0
         self._lock = threading.Lock()
+        self._last_uipi_warn_ts = 0.0
+        self.on_uipi_blocked = None
 
         if IS_WINDOWS:
             self._user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -195,9 +207,17 @@ class WindowsInputController:
         if not IS_WINDOWS or self._user32 is None or not items:
             return 0
         arr = (INPUT * len(items))(*items)
+        ctypes.set_last_error(0)
         sent = self._user32.SendInput(len(items), arr, ctypes.sizeof(INPUT))
         if sent != len(items):
-            logger.warning("SendInput sent %d/%d events (err=%d)", sent, len(items), ctypes.get_last_error())
+            err = ctypes.get_last_error()
+            logger.warning("SendInput sent %d/%d events (err=%d)", sent, len(items), err)
+            if err == 5 and not is_admin():
+                now = time.monotonic()
+                if now - self._last_uipi_warn_ts > 5.0:
+                    self._last_uipi_warn_ts = now
+                    if callable(self.on_uipi_blocked):
+                        self.on_uipi_blocked()
         return int(sent)
 
     def move_mouse(self, dx: float, dy: float) -> None:

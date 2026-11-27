@@ -22,7 +22,7 @@ from .config import AppConfig, get_lan_ip, load_config
 from .overlay import StatusOverlay
 from .tray import SystemTrayController, set_console_visible
 from .udp_server import start_udp_server
-from .win_input import WindowsInputController
+from .win_input import WindowsInputController, is_admin
 
 logger = logging.getLogger(__name__)
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
@@ -65,6 +65,11 @@ def create_app(
     )
     asr_engine = SenseVoiceAsrEngine(app_cfg.asr, app_cfg.llm_polish)
     overlay = StatusOverlay(enabled=app_cfg.server.enable_overlay)
+    controller.on_uipi_blocked = lambda: overlay.show(
+        "error",
+        "⚠ 当前窗口为管理员权限，请右键托盘以管理员重启",
+        auto_hide_ms=3500,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -88,6 +93,7 @@ def create_app(
         print(f"  WS 端口     : {app_cfg.server.ws_port}")
         print(f"  UDP 端口    : {app_cfg.server.udp_port}")
         print(f"  配对码      : {app_cfg.server.token}")
+        print(f"  运行权限    : {'管理员（可控制所有软件窗口）' if is_admin() else '普通权限（遇到管理员软件失灵时，请右键托盘选择「以管理员权限重启」）'}")
         print(f"  扫码页      : {pair_url}")
         print(f"  网页调试端  : http://{lan_ip}:{app_cfg.server.ws_port}/debug?token={app_cfg.server.token}")
         print("=" * 60)

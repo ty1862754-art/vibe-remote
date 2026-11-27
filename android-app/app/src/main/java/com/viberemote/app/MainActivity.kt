@@ -219,6 +219,11 @@ class MainActivity : ComponentActivity() {
         window.attributes = lp
     }
 
+    override fun onResume() {
+        super.onResume()
+        client.ensureAlive()
+    }
+
     override fun onPause() {
         super.onPause()
         if (isRecordingState.value) {
