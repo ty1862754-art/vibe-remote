@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+pc-server/config.toml
+pc-server/models/
+pc-server/build/
+pc-server/dist/
+pc-server/*.spec
+pc-server/*.zip
+pc-server/.vibe_token
+
+# Android
+android-app/.gradle/
+android-app/local.properties
+android-app/.idea/
+android-app/build/
+android-app/app/build/
+android-app/*.iml
+*.keystore
+*.jks
+
+# OS
+.DS_Store
+Thumbs.db

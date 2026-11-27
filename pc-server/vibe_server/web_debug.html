@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>VibeRemote 调试面板</title>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, sans-serif;
+      background: #0f1117; color: #e5e7eb; height: 100dvh; display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px; background: #161922; border-bottom: 1px solid #262b38; font-size: 14px;
+    }
+    .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 6px; background: #ef4444; }
+    .dot.ok { background: #10b981; }
+    #touchpad {
+      flex: 1; margin: 12px; border-radius: 16px; background: #181c26;
+      border: 1px solid #2a3040; display: flex; align-items: center; justify-content: center;
+      color: #6b7280; touch-action: none; user-select: none; text-align: center; padding: 16px;
+    }
+    .row { display: flex; gap: 8px; padding: 0 12px 10px; }
+    button {
+      flex: 1; padding: 12px 8px; border-radius: 10px; border: 1px solid #2e3547;
+      background: #1e2433; color: #f3f4f6; font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    button:active { background: #3b82f6; }
+    input[type="text"] {
+      flex: 3; padding: 11px 12px; border-radius: 10px; border: 1px solid #2e3547;
+      background: #161922; color: #f9fafb; font-size: 15px;
+    }
+    .send-btn { flex: 1; background: #2563eb; border-color: #2563eb; }
+  </style>
+</head>
+<body>
+  <header>
+    <div><span id="dot" class="dot"></span><span id="status">连接中...</span></div>
+    <label style="font-size:13px;"><input id="autoEnter" type="checkbox" checked /> 自动回车</label>
+  </header>
+
+  <div id="touchpad">单指滑动控制鼠标 · 轻点左键 · 网页调试兜底版<br/>（完整音量键盲操录音请使用原生 Android App）</div>
+
+  <div class="row">
+    <button onclick="sendClick('left')">左键</button>
+    <button onclick="sendClick('right')">右键</button>
+    <button onclick="sendKey(['enter'])">Enter</button>
+    <button onclick="sendKey(['ctrl','z'])">撤销</button>
+    <button onclick="sendKey(['esc'])">Esc</button>
+  </div>
+
+  <div class="row">
+    <input id="textInput" type="text" placeholder="可用手机语音输入法说话，点发送直达电脑光标..." />
+    <button class="send-btn" onclick="sendText()">发送</button>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const token = params.get("token") || "";
+    const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${wsProto}//${location.host}/ws?token=${encodeURIComponent(token)}`;
+    let ws = null;
+
+    function connect() {
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => {
+        document.getElementById("dot").classList.add("ok");
+        document.getElementById("status").textContent = "已连接电脑";
+      };
+      ws.onclose = () => {
+        document.getElementById("dot").classList.remove("ok");
+        document.getElementById("status").textContent = "已断开，正在重连...";
+        setTimeout(connect, 1500);
+      };
+    }
+    connect();
+
+    function sendJson(obj) {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+    }
+    function sendClick(btn) { sendJson({ type: "click", button: btn, action: "click" }); }
+    function sendKey(keys) { sendJson({ type: "key", keys }); }
+    function sendText() {
+      const el = document.getElementById("textInput");
+      const text = el.value.trim();
+      if (!text) return;
+      sendJson({ type: "text", text, auto_enter: document.getElementById("autoEnter").checked });
+      el.value = "";
+    }
+    document.getElementById("textInput").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") sendText();
+    });
+
+    const pad = document.getElementById("touchpad");
+    let lastX = 0, lastY = 0, downTime = 0, moved = 0, active = false;
+    pad.addEventListener("pointerdown", (e) => {
+      active = true; lastX = e.clientX; lastY = e.clientY; downTime = Date.now(); moved = 0;
+      pad.setPointerCapture(e.pointerId);
+    });
+    pad.addEventListener("pointermove", (e) => {
+      if (!active) return;
+      const dx = (e.clientX - lastX) * 1.6;
+      const dy = (e.clientY - lastY) * 1.6;
+      moved += Math.hypot(dx, dy);
+      lastX = e.clientX; lastY = e.clientY;
+      sendJson({ type: "move", dx, dy });
+    });
+    pad.addEventListener("pointerup", () => {
+      if (active && Date.now() - downTime < 220 && moved < 14) sendClick("left");
+      active = false;
+    });
+  </script>
+</body>
+</html>

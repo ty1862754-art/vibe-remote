@@ -1,0 +1,73 @@
+name: Build Windows Server (Portable ZIP)
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'pc-server/**'
+      - '.github/workflows/build-windows-server.yml'
+  workflow_dispatch:
+  release:
+    types: [ published ]
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Python 3.12 and dependencies
+        working-directory: pc-server
+        run: |
+          uv python install 3.12
+          uv sync --python 3.12
+          uv pip install pyinstaller
+
+      - name: Run unit tests
+        working-directory: pc-server
+        run: uv run pytest -v
+
+      - name: Bundle portable Windows executable with PyInstaller
+        working-directory: pc-server
+        run: |
+          uv run pyinstaller --noconfirm --onedir --console `
+            --name VibeRemoteServer `
+            --add-data "vibe_server/web_debug.html;vibe_server" `
+            --collect-all sherpa_onnx `
+            --collect-all sherpa_onnx_core `
+            --collect-all qrcode `
+            --hidden-import uvicorn.logging `
+            --hidden-import uvicorn.loops.auto `
+            --hidden-import uvicorn.protocols.http.auto `
+            --hidden-import uvicorn.protocols.websockets.auto `
+            --hidden-import uvicorn.lifespan.on `
+            --hidden-import tkinter `
+            run_server.py
+
+      - name: Package portable ZIP
+        working-directory: pc-server
+        run: |
+          Copy-Item config.example.toml dist/VibeRemoteServer/
+          Copy-Item 放行防火墙.bat dist/VibeRemoteServer/
+          Compress-Archive -Path dist/VibeRemoteServer/* -DestinationPath VibeRemote-Windows-Portable.zip -Force
+
+      - name: Upload Windows Portable Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VibeRemote-Windows-Portable
+          path: pc-server/VibeRemote-Windows-Portable.zip
+          retention-days: 30
+
+      - name: Attach ZIP to GitHub Release (when triggered by Release)
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: pc-server/VibeRemote-Windows-Portable.zip

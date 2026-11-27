@@ -1,0 +1,47 @@
+# 复制本文件为 config.toml 以自定义配置（不复制也会使用开箱即用的默认值）
+
+[server]
+host = "0.0.0.0"
+ws_port = 8765
+udp_port = 8766
+# 留空则每次启动自动生成，或填写固定 6 位数字方便手机自动重连
+token = ""
+# 是否显示屏幕底部非抢焦点的状态小浮窗
+enable_overlay = true
+
+[input]
+# 鼠标移动灵敏度倍率
+mouse_sensitivity = 1.0
+# 滚轮灵敏度倍率
+scroll_sensitivity = 1.0
+# 粘贴上屏后还原原剪贴板的延迟（毫秒）
+clipboard_restore_delay_ms = 120
+
+[asr]
+# 本地 sherpa-onnx + SenseVoiceSmall (int8) 模型存放目录
+model_dir = "models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
+# 如 GitHub 下载慢，可改成镜像地址或手动下载解压到 model_dir
+model_url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2"
+num_threads = 4
+# auto / zh / en / ja / ko / yue
+language = "auto"
+use_itn = true
+
+# Vibe Coding 常见口述词自动纠错表（不区分大小写替换）
+[asr.hotwords]
+"巴格" = "bug"
+"吉特" = "Git"
+"派森" = "Python"
+"瑞艾克特" = "React"
+"韦伯索克特" = "WebSocket"
+"艾皮艾" = "API"
+
+[llm_polish]
+# 可选：填写任意 OpenAI 兼容接口（DeepSeek / OpenAI / 硅基流动 / 本地 Ollama 等）
+# 在手机端打开「润色」开关后，会自动去口癖并整理成清晰的编程指令
+enabled = false
+base_url = "https://api.openai.com/v1"
+api_key = ""
+model = "gpt-4o-mini"
+timeout_seconds = 10.0
+system_prompt = "你是一个程序员的语音转写整理助手。请把用户的中英混合口述内容整理成简洁、准确、无口癖（去掉呃/那个/就是说等）的文本，自动修正明显读错的编程术语拼写。保留原意，不要回答问题，只输出整理后的最终文本。"
