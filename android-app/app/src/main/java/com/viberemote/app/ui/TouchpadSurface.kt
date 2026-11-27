@@ -28,6 +28,7 @@ import kotlin.math.pow
 fun TouchpadSurface(
     modifier: Modifier = Modifier,
     sensitivity: Float,
+    naturalScroll: Boolean,
     enabled: Boolean,
     isRecording: Boolean,
     onMove: (Float, Float) -> Unit,
@@ -36,6 +37,7 @@ fun TouchpadSurface(
     onTapFeedback: () -> Unit,
 ) {
     val currentSensitivity by rememberUpdatedState(sensitivity)
+    val currentNaturalScroll by rememberUpdatedState(naturalScroll)
     val currentEnabled by rememberUpdatedState(enabled)
     val currentOnMove by rememberUpdatedState(onMove)
     val currentOnScroll by rememberUpdatedState(onScroll)
@@ -119,7 +121,8 @@ fun TouchpadSurface(
                                 val avgDy = sumDy / counted
                                 totalDistance += hypot(avgDx, avgDy)
                                 // Windows wheel: positive = scroll up, negative = scroll down
-                                currentOnScroll(avgDx * 3.5f, avgDy * 4.5f)
+                                val scrollSign = if (currentNaturalScroll) 1f else -1f
+                                currentOnScroll(avgDx * 3.5f * scrollSign, avgDy * 4.5f * scrollSign)
                             }
                         } else {
                             pressedChanges.forEach { ch ->

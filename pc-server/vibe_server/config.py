@@ -33,6 +33,8 @@ class ServerConfig:
     udp_port: int = 8766
     token: str = ""
     enable_overlay: bool = True
+    enable_tray: bool = True
+    start_minimized: bool = False
 
 
 @dataclass
@@ -126,6 +128,8 @@ def load_config(config_path: Path | None = None) -> AppConfig:
             udp_port=int(srv_raw.get("udp_port", 8766)),
             token=token,
             enable_overlay=bool(srv_raw.get("enable_overlay", True)),
+            enable_tray=bool(srv_raw.get("enable_tray", True)),
+            start_minimized=bool(srv_raw.get("start_minimized", False)),
         ),
         input=InputConfig(
             mouse_sensitivity=float(inp_raw.get("mouse_sensitivity", 1.0)),

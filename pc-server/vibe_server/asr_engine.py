@@ -20,6 +20,7 @@ class TranscriptResult:
     final_text: str
     latency_ms: int
     polished: bool = False
+    chunks: int = 1
 
 
 def ensure_sensevoice_model(asr_cfg: AsrConfig) -> tuple[Path, Path]:
@@ -96,6 +97,115 @@ def pcm16_bytes_to_float32(pcm_bytes: bytes) -> np.ndarray:
     return arr
 
 
+def _frame_rms(samples: np.ndarray, frame_size: int) -> np.ndarray:
+    n_frames = samples.size // frame_size
+    if n_frames <= 0:
+        return np.zeros(0, dtype=np.float32)
+    framed = samples[: n_frames * frame_size].reshape(n_frames, frame_size)
+    return np.sqrt(np.mean(framed * framed, axis=1))
+
+
+def trim_silence(
+    samples: np.ndarray,
+    sample_rate: int = 16000,
+    min_rms: float = 0.008,
+    min_voiced_ms: int = 120,
+    pad_start_ms: int = 180,
+    pad_end_ms: int = 220,
+) -> np.ndarray:
+    """
+    Energy-based VAD that filters pure room noise / accidental brief presses
+    and trims leading & trailing silence while preserving natural speech padding.
+    """
+    frame_ms = 20
+    frame_size = max(1, int(sample_rate * frame_ms / 1000))
+    rms = _frame_rms(samples, frame_size)
+    if rms.size == 0:
+        return np.zeros(0, dtype=np.float32)
+
+    peak_rms = float(np.max(rms))
+    if peak_rms < min_rms:
+        return np.zeros(0, dtype=np.float32)
+
+    noise_floor = float(np.percentile(rms, 15))
+    thresh = max(min_rms, min(0.035, noise_floor * 2.5, peak_rms * 0.45))
+    voiced = np.flatnonzero(rms >= thresh)
+    if voiced.size * frame_ms < min_voiced_ms:
+        return np.zeros(0, dtype=np.float32)
+
+    pad_start = int(pad_start_ms / frame_ms)
+    pad_end = int(pad_end_ms / frame_ms)
+    start_frame = max(0, int(voiced[0]) - pad_start)
+    end_frame = min(rms.size, int(voiced[-1]) + 1 + pad_end)
+    return samples[start_frame * frame_size : min(samples.size, end_frame * frame_size)]
+
+
+def split_long_audio(
+    samples: np.ndarray,
+    sample_rate: int = 16000,
+    max_chunk_sec: float = 22.0,
+    min_chunk_sec: float = 12.0,
+) -> list[np.ndarray]:
+    """
+    Split audio longer than `max_chunk_sec` at the quietest pause between
+    `min_chunk_sec` and `max_chunk_sec` so SenseVoice never truncates >30s speech.
+    """
+    max_len = int(max_chunk_sec * sample_rate)
+    if samples.size <= max_len:
+        return [samples] if samples.size > 0 else []
+
+    min_len = int(min_chunk_sec * sample_rate)
+    frame_ms = 20
+    frame_size = max(1, int(sample_rate * frame_ms / 1000))
+    pause_window_frames = 10  # 200ms rolling energy window
+
+    chunks: list[np.ndarray] = []
+    start = 0
+    total = samples.size
+
+    while start < total:
+        remaining = total - start
+        if remaining <= max_len:
+            tail = samples[start:total]
+            if tail.size >= int(0.15 * sample_rate):
+                chunks.append(tail)
+            break
+
+        search_lo = start + min_len
+        search_hi = min(total, start + max_len)
+        window = samples[search_lo:search_hi]
+        rms = _frame_rms(window, frame_size)
+
+        if rms.size > pause_window_frames:
+            kernel = np.ones(pause_window_frames, dtype=np.float32) / pause_window_frames
+            smoothed = np.convolve(rms, kernel, mode="valid")
+            best_idx = int(np.argmin(smoothed))
+            split_pos = search_lo + (best_idx + pause_window_frames // 2) * frame_size
+        elif rms.size > 0:
+            split_pos = search_lo + int(np.argmin(rms)) * frame_size
+        else:
+            split_pos = search_hi
+
+        chunks.append(samples[start:split_pos])
+        start = split_pos
+
+    return chunks
+
+
+def join_transcript_chunks(parts: list[str]) -> str:
+    """Join chunked transcripts naturally (insert space only between adjacent ASCII words)."""
+    cleaned = [p.strip() for p in parts if p and p.strip()]
+    if not cleaned:
+        return ""
+    out = cleaned[0]
+    for nxt in cleaned[1:]:
+        if out[-1].isascii() and out[-1].isalnum() and nxt[0].isascii() and nxt[0].isalnum():
+            out += " " + nxt
+        else:
+            out += nxt
+    return out
+
+
 class SenseVoiceAsrEngine:
     """Local offline ASR backed by sherpa-onnx + SenseVoiceSmall."""
 
@@ -159,14 +269,25 @@ class SenseVoiceAsrEngine:
             raise RuntimeError(self._load_error or "ASR 模型尚未就绪")
 
         t0 = time.perf_counter()
-        samples = pcm16_bytes_to_float32(pcm_bytes)
-        if samples.size < int(sample_rate * 0.15):
-            return TranscriptResult(raw_text="", final_text="", latency_ms=0, polished=False)
+        raw_samples = pcm16_bytes_to_float32(pcm_bytes)
+        if raw_samples.size < int(sample_rate * 0.15):
+            return TranscriptResult(raw_text="", final_text="", latency_ms=0, polished=False, chunks=0)
 
-        stream = self._recognizer.create_stream()
-        stream.accept_waveform(sample_rate, samples)
-        self._recognizer.decode_stream(stream)
-        raw_text = str(stream.result.text).strip()
+        trimmed = trim_silence(raw_samples, sample_rate=sample_rate)
+        if trimmed.size < int(sample_rate * 0.12):
+            return TranscriptResult(raw_text="", final_text="", latency_ms=0, polished=False, chunks=0)
+
+        chunks = split_long_audio(trimmed, sample_rate=sample_rate)
+        chunk_texts: list[str] = []
+        for chunk in chunks:
+            stream = self._recognizer.create_stream()
+            stream.accept_waveform(sample_rate, chunk)
+            self._recognizer.decode_stream(stream)
+            piece = str(stream.result.text).strip()
+            if piece:
+                chunk_texts.append(piece)
+
+        raw_text = join_transcript_chunks(chunk_texts)
         final_text = apply_hotwords(raw_text, self.asr_cfg.hotwords)
 
         polished = False
@@ -182,6 +303,7 @@ class SenseVoiceAsrEngine:
             final_text=final_text,
             latency_ms=latency_ms,
             polished=polished,
+            chunks=len(chunks),
         )
 
     def _polish_with_llm(self, text: str) -> str | None:

@@ -42,6 +42,7 @@ data class ServerStatus(
     val statusMessage: String = "未连接电脑",
     val lastTranscript: String = "",
     val lastLatencyMs: Int = 0,
+    val history: List<String> = emptyList(),
 )
 
 class RemoteClient(
@@ -228,10 +229,16 @@ class RemoteClient(
             "transcript" -> {
                 val finalText = obj.optString("final_text", "")
                 val latency = obj.optInt("latency_ms", 0)
+                val updatedHistory = if (finalText.isNotBlank()) {
+                    (listOf(finalText) + _status.value.history.filterNot { it == finalText }).take(10)
+                } else {
+                    _status.value.history
+                }
                 _status.value = _status.value.copy(
                     voiceState = "idle",
                     lastTranscript = finalText,
                     lastLatencyMs = latency,
+                    history = updatedHistory,
                     statusMessage = if (latency > 0) "已上屏 (${latency}ms)" else "已上屏",
                 )
                 if (finalText.isNotBlank()) {

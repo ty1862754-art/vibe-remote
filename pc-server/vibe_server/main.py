@@ -20,6 +20,7 @@ from . import __version__
 from .asr_engine import SenseVoiceAsrEngine
 from .config import AppConfig, get_lan_ip, load_config
 from .overlay import StatusOverlay
+from .tray import SystemTrayController, set_console_visible
 from .udp_server import start_udp_server
 from .win_input import WindowsInputController
 
@@ -54,6 +55,7 @@ def create_app(
     auto_download_model: bool = True,
     skip_asr_load: bool = False,
     start_udp: bool = True,
+    on_tray_quit=None,
 ) -> FastAPI:
     app_cfg = cfg or load_config()
     controller = WindowsInputController(
@@ -78,6 +80,7 @@ def create_app(
         pair_uri = build_pair_uri(
             lan_ip, app_cfg.server.ws_port, app_cfg.server.udp_port, app_cfg.server.token
         )
+        pair_url = f"http://{lan_ip}:{app_cfg.server.ws_port}/pair"
         print("\n" + "=" * 60)
         print(f"  VibeRemote Server v{__version__} 已启动")
         print("=" * 60)
@@ -85,14 +88,25 @@ def create_app(
         print(f"  WS 端口     : {app_cfg.server.ws_port}")
         print(f"  UDP 端口    : {app_cfg.server.udp_port}")
         print(f"  配对码      : {app_cfg.server.token}")
-        print(f"  扫码页      : http://{lan_ip}:{app_cfg.server.ws_port}/pair")
+        print(f"  扫码页      : {pair_url}")
         print(f"  网页调试端  : http://{lan_ip}:{app_cfg.server.ws_port}/debug?token={app_cfg.server.token}")
         print("=" * 60)
-        print("  使用 Android App 扫描下方二维码一键连接：\n")
+        print("  使用 Android App 扫描下方二维码一键连接（右键右下角托盘图标可隐藏窗口/设置开机自启）：\n")
         print_terminal_qr(pair_uri)
+
+        tray = SystemTrayController(
+            enabled=app_cfg.server.enable_tray,
+            pair_url=pair_url,
+            display_endpoint=f"{lan_ip}:{app_cfg.server.ws_port}",
+            on_quit=on_tray_quit or (lambda: None),
+        )
+        tray.start()
+        if app_cfg.server.start_minimized:
+            set_console_visible(False)
 
         yield
 
+        tray.stop()
         if udp_transport is not None:
             udp_transport.close()
         overlay.stop()
@@ -320,6 +334,8 @@ def cli() -> None:
     parser = argparse.ArgumentParser(description="VibeRemote Windows PC Server")
     parser.add_argument("--config", type=Path, default=None, help="Path to config.toml")
     parser.add_argument("--no-overlay", action="store_true", help="Disable Windows floating overlay")
+    parser.add_argument("--no-tray", action="store_true", help="Disable Windows system tray icon")
+    parser.add_argument("--minimized", action="store_true", help="Start with console window hidden to tray")
     parser.add_argument("--no-download", action="store_true", help="Do not auto-download ASR model")
     args = parser.parse_args()
 
@@ -327,9 +343,26 @@ def cli() -> None:
     cfg = load_config(args.config)
     if args.no_overlay:
         cfg.server.enable_overlay = False
+    if args.no_tray:
+        cfg.server.enable_tray = False
+    if args.minimized:
+        cfg.server.start_minimized = True
 
-    app = create_app(cfg, auto_download_model=not args.no_download)
-    uvicorn.run(app, host=cfg.server.host, port=cfg.server.ws_port, log_level="warning")
+    server_ref: list[uvicorn.Server] = []
+
+    def request_shutdown() -> None:
+        if server_ref:
+            server_ref[0].should_exit = True
+
+    app = create_app(
+        cfg,
+        auto_download_model=not args.no_download,
+        on_tray_quit=request_shutdown,
+    )
+    uv_config = uvicorn.Config(app, host=cfg.server.host, port=cfg.server.ws_port, log_level="warning")
+    server = uvicorn.Server(uv_config)
+    server_ref.append(server)
+    server.run()
 
 
 if __name__ == "__main__":

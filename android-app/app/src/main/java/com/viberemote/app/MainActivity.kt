@@ -215,7 +215,7 @@ class MainActivity : ComponentActivity() {
 
     private fun applyBrightness(dim: Boolean) {
         val lp = window.attributes
-        lp.screenBrightness = if (dim) 0.03f else WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        lp.screenBrightness = if (dim) 0.01f else WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
         window.attributes = lp
     }
 

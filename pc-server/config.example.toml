@@ -8,6 +8,10 @@ udp_port = 8766
 token = ""
 # 是否显示屏幕底部非抢焦点的状态小浮窗
 enable_overlay = true
+# 是否启用 Windows 右下角系统托盘图标
+enable_tray = true
+# 启动后是否自动隐藏黑色控制台窗口（托盘右键可随时重新显示）
+start_minimized = false
 
 [input]
 # 鼠标移动灵敏度倍率

@@ -44,6 +44,9 @@ jobs:
             --collect-all sherpa_onnx `
             --collect-all sherpa_onnx_core `
             --collect-all qrcode `
+            --collect-all pystray `
+            --collect-all PIL `
+            --hidden-import pystray._win32 `
             --hidden-import uvicorn.logging `
             --hidden-import uvicorn.loops.auto `
             --hidden-import uvicorn.protocols.http.auto `

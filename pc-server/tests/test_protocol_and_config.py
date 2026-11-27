@@ -6,7 +6,13 @@ import sys
 import numpy as np
 from fastapi.testclient import TestClient
 
-from vibe_server.asr_engine import SenseVoiceAsrEngine, pcm16_bytes_to_float32
+from vibe_server.asr_engine import (
+    SenseVoiceAsrEngine,
+    join_transcript_chunks,
+    pcm16_bytes_to_float32,
+    split_long_audio,
+    trim_silence,
+)
 from vibe_server.config import AppConfig, AsrConfig, LlmPolishConfig, ServerConfig, apply_hotwords
 from vibe_server.main import build_pair_uri, create_app
 from vibe_server.protocol import UdpMousePacket, parse_udp_packet
@@ -60,7 +66,7 @@ def test_pair_uri_and_websocket_auth() -> None:
     uri = build_pair_uri("192.168.1.10", 8765, 8766, "654321")
     assert uri == "viberemote://connect?host=192.168.1.10&port=8765&udp=8766&token=654321"
 
-    cfg = AppConfig(server=ServerConfig(token="654321", enable_overlay=False))
+    cfg = AppConfig(server=ServerConfig(token="654321", enable_overlay=False, enable_tray=False))
     app = create_app(cfg, skip_asr_load=True, start_udp=False)
 
     with TestClient(app) as client:
@@ -112,9 +118,39 @@ def test_sherpa_onnx_decode_stream_api() -> None:
     engine._recognizer = _FakeRecognizer()
     engine._ready = True
 
-    # 0.25s of 16kHz PCM16 silence
-    pcm = np.zeros(4000, dtype="<i2").tobytes()
-    res = engine.transcribe_pcm16(pcm, sample_rate=16000)
+    # 0.25s of 16kHz PCM16 tone (voiced, so VAD keeps it)
+    t = np.arange(4000, dtype=np.float32) / 16000.0
+    tone = (0.3 * np.sin(2 * np.pi * 440.0 * t) * 32767.0).astype("<i2")
+    res = engine.transcribe_pcm16(tone.tobytes(), sample_rate=16000)
     assert res.raw_text == "帮我修一下巴格"
     assert res.final_text == "帮我修一下bug"
+    assert res.chunks == 1
+
+
+def test_vad_trim_and_long_audio_chunking() -> None:
+    sr = 16000
+    # 1) Pure low-level noise should be filtered out completely
+    quiet = np.full(sr, 0.001, dtype=np.float32)
+    assert trim_silence(quiet, sample_rate=sr).size == 0
+
+    # 2) Leading/trailing silence should be trimmed while preserving speech
+    t = np.arange(sr, dtype=np.float32) / sr
+    speech = 0.25 * np.sin(2 * np.pi * 300.0 * t).astype(np.float32)
+    padded = np.concatenate([np.zeros(sr * 2, dtype=np.float32), speech, np.zeros(sr * 2, dtype=np.float32)])
+    trimmed = trim_silence(padded, sample_rate=sr)
+    assert int(sr * 1.0) <= trimmed.size <= int(sr * 1.6)
+
+    # 3) 36s speech with a quiet pause at 16s should split into 2 chunks near the pause
+    seg1 = 0.2 * np.sin(2 * np.pi * 250.0 * (np.arange(sr * 16, dtype=np.float32) / sr)).astype(np.float32)
+    pause = np.zeros(int(sr * 0.6), dtype=np.float32)
+    seg2 = 0.2 * np.sin(2 * np.pi * 350.0 * (np.arange(sr * 19, dtype=np.float32) / sr)).astype(np.float32)
+    long_audio = np.concatenate([seg1, pause, seg2])
+    chunks = split_long_audio(long_audio, sample_rate=sr, max_chunk_sec=22.0, min_chunk_sec=12.0)
+    assert len(chunks) == 2
+    assert 15.5 * sr <= chunks[0].size <= 17.0 * sr
+
+    # 4) Transcript joining handles Chinese and ASCII words cleanly
+    assert join_transcript_chunks(["帮我重构", "这个函数"]) == "帮我重构这个函数"
+    assert join_transcript_chunks(["fix the", "bug now"]) == "fix the bug now"
+
 

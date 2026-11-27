@@ -9,6 +9,7 @@ data class ConnectionConfig(
     val udpPort: Int = 8766,
     val token: String = "",
     val sensitivity: Float = 1.6f,
+    val naturalScroll: Boolean = true,
     val autoEnter: Boolean = true,
     val llmPolish: Boolean = false,
     val volumeKeyBlindMode: Boolean = true,
@@ -64,6 +65,7 @@ class ConfigStore(context: Context) {
             udpPort = prefs.getInt("udp_port", 8766),
             token = prefs.getString("token", "").orEmpty(),
             sensitivity = prefs.getFloat("sensitivity", 1.6f),
+            naturalScroll = prefs.getBoolean("natural_scroll", true),
             autoEnter = prefs.getBoolean("auto_enter", true),
             llmPolish = prefs.getBoolean("llm_polish", false),
             volumeKeyBlindMode = prefs.getBoolean("volume_blind", true),
@@ -78,6 +80,7 @@ class ConfigStore(context: Context) {
             .putInt("udp_port", config.udpPort)
             .putString("token", config.token)
             .putFloat("sensitivity", config.sensitivity)
+            .putBoolean("natural_scroll", config.naturalScroll)
             .putBoolean("auto_enter", config.autoEnter)
             .putBoolean("llm_polish", config.llmPolish)
             .putBoolean("volume_blind", config.volumeKeyBlindMode)

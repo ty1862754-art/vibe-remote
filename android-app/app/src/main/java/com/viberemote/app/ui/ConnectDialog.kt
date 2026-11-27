@@ -57,6 +57,7 @@ fun ConnectDialog(
     var udpPort by remember { mutableStateOf(initialConfig.udpPort.toString()) }
     var token by remember { mutableStateOf(initialConfig.token) }
     var sensitivity by remember { mutableFloatStateOf(initialConfig.sensitivity) }
+    var naturalScroll by remember { mutableStateOf(initialConfig.naturalScroll) }
     var volumeBlind by remember { mutableStateOf(initialConfig.volumeKeyBlindMode) }
     var volumeUpAction by remember { mutableStateOf(initialConfig.volumeUpAction) }
 
@@ -74,6 +75,7 @@ fun ConnectDialog(
                 udpPort = parsed.udpPort,
                 token = parsed.token,
                 sensitivity = sensitivity,
+                naturalScroll = naturalScroll,
                 volumeKeyBlindMode = volumeBlind,
                 volumeUpAction = volumeUpAction,
             )
@@ -214,6 +216,22 @@ fun ConnectDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
+                        Text("反转滚轮方向（自然滚动）", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text(
+                            if (naturalScroll) "当前：双指上滑内容上滚" else "当前：传统鼠标滚轮方向",
+                            fontSize = 11.sp,
+                            color = TextSecondary,
+                        )
+                    }
+                    Switch(checked = naturalScroll, onCheckedChange = { naturalScroll = it })
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text("音量键盲操", fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         Text("音量- 按住录音，音量+ 快捷发送", fontSize = 11.sp, color = TextSecondary)
                     }
@@ -257,6 +275,7 @@ fun ConnectDialog(
                         udpPort = udpPort.toIntOrNull() ?: 8766,
                         token = token.trim(),
                         sensitivity = sensitivity,
+                        naturalScroll = naturalScroll,
                         volumeKeyBlindMode = volumeBlind,
                         volumeUpAction = volumeUpAction,
                     )
