@@ -5,7 +5,9 @@ import asyncio
 import io
 import json
 import logging
+import os
 import sys
+import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
@@ -22,6 +24,7 @@ from .config import AppConfig, get_lan_ip, load_config
 from .overlay import StatusOverlay
 from .tray import SystemTrayController, set_console_visible
 from .udp_server import start_udp_server
+from .updater import check_latest_release, download_windows_update
 from .win_input import WindowsInputController, is_admin
 
 logger = logging.getLogger(__name__)
@@ -100,11 +103,32 @@ def create_app(
         print("  使用 Android App 扫描下方二维码一键连接（右键右下角托盘图标可隐藏窗口/设置开机自启）：\n")
         print_terminal_qr(pair_uri)
 
+        def handle_tray_check_update() -> None:
+            overlay.show("transcribing", "🔍 正在检查 GitHub 最新版本...")
+            try:
+                info = check_latest_release(app_cfg.update, __version__)
+                if not info.has_update:
+                    overlay.show("done", f"✅ 已是最新版本 v{info.current_version}", auto_hide_ms=2500)
+                    return
+                overlay.show("polishing", f"⬇ 发现 v{info.latest_version}，正在下载安装包...")
+                try:
+                    zip_path = download_windows_update(info, app_cfg.update)
+                    overlay.show("done", f"✅ 已下载到 updates/{zip_path.name}", auto_hide_ms=3500)
+                    if sys.platform == "win32":
+                        os.startfile(str(zip_path.parent))  # type: ignore[attr-defined]
+                except Exception:
+                    overlay.show("done", f"🆕 发现 v{info.latest_version}，已打开下载页", auto_hide_ms=3000)
+                    webbrowser.open(info.release_url)
+            except Exception as exc:
+                logger.warning("检查更新失败: %s", exc)
+                overlay.show("error", f"⚠ 检查更新失败: {exc}", auto_hide_ms=3500)
+
         tray = SystemTrayController(
             enabled=app_cfg.server.enable_tray,
             pair_url=pair_url,
             display_endpoint=f"{lan_ip}:{app_cfg.server.ws_port}",
             on_quit=on_tray_quit or (lambda: None),
+            on_check_update=handle_tray_check_update,
         )
         tray.start()
         if app_cfg.server.start_minimized:
@@ -134,6 +158,24 @@ def create_app(
                 "llm_polish_available": app_cfg.llm_polish.is_available,
             }
         )
+
+    @app.get("/update/check")
+    async def check_update() -> JSONResponse:
+        try:
+            info = await asyncio.to_thread(check_latest_release, app_cfg.update, __version__)
+            return JSONResponse(
+                {
+                    "current_version": info.current_version,
+                    "latest_version": info.latest_version,
+                    "has_update": info.has_update,
+                    "release_url": info.release_url,
+                    "windows_download_url": info.windows_download_url,
+                    "android_download_url": info.android_download_url,
+                    "notes": info.notes,
+                }
+            )
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=502)
 
     @app.get("/pair", response_class=HTMLResponse)
     async def pair_page() -> HTMLResponse:

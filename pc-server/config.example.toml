@@ -13,6 +13,11 @@ enable_tray = true
 # 启动后是否自动隐藏黑色控制台窗口（托盘右键可随时重新显示）
 start_minimized = false
 
+[update]
+# GitHub Releases 仓库（默认直接检查公开 Release；若仓库保持私有，可填写只读 GitHub Token）
+github_repo = "ty1862754-art/vibe-remote"
+github_token = ""
+
 [input]
 # 鼠标移动灵敏度倍率
 mouse_sensitivity = 1.0

@@ -154,3 +154,13 @@ def test_vad_trim_and_long_audio_chunking() -> None:
     assert join_transcript_chunks(["fix the", "bug now"]) == "fix the bug now"
 
 
+def test_semver_comparison() -> None:
+    from vibe_server.updater import is_newer_version, parse_semver
+
+    assert parse_semver("v0.3.0") == (0, 3, 0)
+    assert is_newer_version("v0.3.1", "0.3.0") is True
+    assert is_newer_version("v0.3.0", "0.3.0") is False
+    assert is_newer_version("v0.2.9", "0.3.0") is False
+    assert is_newer_version("v1.0.0", "0.9.9") is True
+
+

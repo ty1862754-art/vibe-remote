@@ -1,5 +1,6 @@
 package com.viberemote.app.ui
 
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -16,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -32,6 +34,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -39,9 +42,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import com.viberemote.app.BuildConfig
 import com.viberemote.app.model.ConnectionConfig
 import com.viberemote.app.model.DiscoveredHost
 import com.viberemote.app.model.VolumeUpAction
+import com.viberemote.app.update.ReleaseUpdate
+import com.viberemote.app.update.UpdateManager
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -53,6 +59,7 @@ fun ConnectDialog(
     onApplyAndConnect: (ConnectionConfig) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var host by remember { mutableStateOf(initialConfig.host) }
     var wsPort by remember { mutableStateOf(initialConfig.wsPort.toString()) }
     var udpPort by remember { mutableStateOf(initialConfig.udpPort.toString()) }
@@ -61,10 +68,17 @@ fun ConnectDialog(
     var naturalScroll by remember { mutableStateOf(initialConfig.naturalScroll) }
     var volumeBlind by remember { mutableStateOf(initialConfig.volumeKeyBlindMode) }
     var volumeUpAction by remember { mutableStateOf(initialConfig.volumeUpAction) }
+    var githubToken by remember { mutableStateOf(initialConfig.githubToken) }
 
     var discovered by remember { mutableStateOf<List<DiscoveredHost>>(emptyList()) }
     var discovering by remember { mutableStateOf(false) }
     var scanError by remember { mutableStateOf<String?>(null) }
+
+    var checkingUpdate by remember { mutableStateOf(false) }
+    var updateInfo by remember { mutableStateOf<ReleaseUpdate?>(null) }
+    var updateStatusText by remember { mutableStateOf<String?>(null) }
+    var downloadingApk by remember { mutableStateOf(false) }
+    var downloadProgress by remember { mutableFloatStateOf(0f) }
 
     val qrLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
         val raw = result.contents ?: return@rememberLauncherForActivityResult
@@ -79,6 +93,7 @@ fun ConnectDialog(
                 naturalScroll = naturalScroll,
                 volumeKeyBlindMode = volumeBlind,
                 volumeUpAction = volumeUpAction,
+                githubToken = githubToken.trim(),
             )
             onApplyAndConnect(merged)
         } else {
@@ -269,6 +284,107 @@ fun ConnectDialog(
                         }
                     }
                 }
+
+                HorizontalDivider(color = BorderSubtle)
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = "软件更新 (当前 v${BuildConfig.VERSION_NAME})",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        OutlinedButton(
+                            enabled = !checkingUpdate && !downloadingApk,
+                            onClick = {
+                                checkingUpdate = true
+                                updateStatusText = null
+                                scope.launch {
+                                    val res = UpdateManager.checkLatestRelease(githubToken.trim())
+                                    checkingUpdate = false
+                                    res.onSuccess { info ->
+                                        updateInfo = info
+                                        updateStatusText = if (info.hasUpdate) {
+                                            "发现新版本 v${info.latestVersion}"
+                                        } else {
+                                            "当前已是最新版本 (v${info.latestVersion})"
+                                        }
+                                    }.onFailure { err ->
+                                        updateStatusText = err.message ?: "检查更新失败"
+                                    }
+                                }
+                            },
+                        ) {
+                            Text(if (checkingUpdate) "检查中..." else "检查更新", fontSize = 12.sp)
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = githubToken,
+                        onValueChange = { githubToken = it.trim() },
+                        label = { Text("GitHub Token (公开仓库留空即可)", fontSize = 12.sp) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    if (updateStatusText != null) {
+                        Text(
+                            text = updateStatusText.orEmpty(),
+                            fontSize = 12.sp,
+                            color = if (updateInfo?.hasUpdate == true) AccentGreen else TextSecondary,
+                        )
+                    }
+
+                    val rel = updateInfo
+                    if (rel != null && rel.hasUpdate) {
+                        if (downloadingApk) {
+                            LinearProgressIndicator(
+                                progress = { downloadProgress },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Text(
+                                text = "正在下载安装包 ${(downloadProgress * 100).toInt()}%...",
+                                fontSize = 11.sp,
+                                color = AccentBlue,
+                            )
+                        } else {
+                            Button(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = {
+                                    downloadingApk = true
+                                    downloadProgress = 0f
+                                    scope.launch {
+                                        val res = UpdateManager.downloadApk(
+                                            context = context,
+                                            release = rel,
+                                            githubToken = githubToken.trim(),
+                                            onProgress = { p -> downloadProgress = p },
+                                        )
+                                        downloadingApk = false
+                                        res.onSuccess { file ->
+                                            val launched = UpdateManager.launchApkInstaller(context, file)
+                                            if (!launched) {
+                                                Toast.makeText(
+                                                    context,
+                                                    "请先允许 VibeRemote 安装应用，返回后再点一次安装",
+                                                    Toast.LENGTH_LONG,
+                                                ).show()
+                                            }
+                                        }.onFailure { err ->
+                                            updateStatusText = err.message ?: "下载失败"
+                                        }
+                                    }
+                                },
+                            ) {
+                                Text("下载并安装 v${rel.latestVersion}")
+                            }
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
@@ -283,6 +399,7 @@ fun ConnectDialog(
                         naturalScroll = naturalScroll,
                         volumeKeyBlindMode = volumeBlind,
                         volumeUpAction = volumeUpAction,
+                        githubToken = githubToken.trim(),
                     )
                     onApplyAndConnect(updated)
                 },

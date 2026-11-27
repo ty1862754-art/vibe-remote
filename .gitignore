@@ -6,6 +6,7 @@ __pycache__/
 .pytest_cache/
 pc-server/config.toml
 pc-server/models/
+pc-server/updates/
 pc-server/build/
 pc-server/dist/
 pc-server/*.spec

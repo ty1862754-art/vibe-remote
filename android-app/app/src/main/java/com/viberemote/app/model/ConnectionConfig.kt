@@ -14,6 +14,7 @@ data class ConnectionConfig(
     val llmPolish: Boolean = false,
     val volumeKeyBlindMode: Boolean = true,
     val volumeUpAction: VolumeUpAction = VolumeUpAction.ENTER,
+    val githubToken: String = "",
 ) {
     val isValid: Boolean
         get() = host.isNotBlank() && wsPort in 1..65535 && udpPort in 1..65535 && token.isNotBlank()
@@ -71,6 +72,7 @@ class ConfigStore(context: Context) {
             llmPolish = prefs.getBoolean("llm_polish", false),
             volumeKeyBlindMode = prefs.getBoolean("volume_blind", true),
             volumeUpAction = action,
+            githubToken = prefs.getString("github_token", "").orEmpty(),
         )
     }
 
@@ -86,6 +88,7 @@ class ConfigStore(context: Context) {
             .putBoolean("llm_polish", config.llmPolish)
             .putBoolean("volume_blind", config.volumeKeyBlindMode)
             .putString("volume_up_action", config.volumeUpAction.name)
+            .putString("github_token", config.githubToken)
             .apply()
     }
 }

@@ -143,11 +143,13 @@ class SystemTrayController:
         pair_url: str,
         display_endpoint: str,
         on_quit: Callable[[], None],
+        on_check_update: Callable[[], None] | None = None,
     ) -> None:
         self.enabled = enabled and IS_WINDOWS
         self.pair_url = pair_url
         self.display_endpoint = display_endpoint
         self.on_quit = on_quit
+        self.on_check_update = on_check_update
         self._icon = None
         self._thread: threading.Thread | None = None
 
@@ -181,6 +183,10 @@ class SystemTrayController:
         def toggle_autostart(icon, item) -> None:
             set_autostart_enabled(not is_autostart_enabled())
 
+        def handle_check_update(icon, item) -> None:
+            if self.on_check_update is not None:
+                threading.Thread(target=self.on_check_update, daemon=True).start()
+
         def handle_elevate(icon, item) -> None:
             if relaunch_as_admin():
                 icon.stop()
@@ -195,6 +201,7 @@ class SystemTrayController:
             pystray.MenuItem(f"VibeRemote ({self.display_endpoint}){admin_tag}", None, enabled=False),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("打开扫码配对页", open_pair, default=True),
+            pystray.MenuItem("检查更新 (GitHub Release)", handle_check_update),
             pystray.MenuItem(
                 "显示控制台窗口",
                 toggle_console,

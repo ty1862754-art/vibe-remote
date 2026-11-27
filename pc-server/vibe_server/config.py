@@ -80,11 +80,18 @@ class LlmPolishConfig:
 
 
 @dataclass
+class UpdateConfig:
+    github_repo: str = "ty1862754-art/vibe-remote"
+    github_token: str = ""
+
+
+@dataclass
 class AppConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     input: InputConfig = field(default_factory=InputConfig)
     asr: AsrConfig = field(default_factory=AsrConfig)
     llm_polish: LlmPolishConfig = field(default_factory=LlmPolishConfig)
+    update: UpdateConfig = field(default_factory=UpdateConfig)
 
 
 def _load_or_create_persistent_token() -> str:
@@ -112,6 +119,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     inp_raw = raw.get("input", {})
     asr_raw = raw.get("asr", {})
     llm_raw = raw.get("llm_polish", {})
+    upd_raw = raw.get("update", {})
 
     hotwords = dict(DEFAULT_HOTWORDS)
     if isinstance(asr_raw.get("hotwords"), dict):
@@ -168,6 +176,10 @@ def load_config(config_path: Path | None = None) -> AppConfig:
                     LlmPolishConfig.system_prompt,
                 )
             ),
+        ),
+        update=UpdateConfig(
+            github_repo=str(upd_raw.get("github_repo", "ty1862754-art/vibe-remote")).strip(),
+            github_token=os.environ.get("VIBE_GITHUB_TOKEN") or str(upd_raw.get("github_token", "")).strip(),
         ),
     )
     return cfg
