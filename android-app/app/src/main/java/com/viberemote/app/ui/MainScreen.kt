@@ -286,8 +286,8 @@ fun MainScreen(
             ) {
                 MacroKeyButton("Tab", Modifier.weight(1f)) { onSendKeys(listOf("tab")); onTapFeedback() }
                 MacroKeyButton("退格", Modifier.weight(1f)) { onSendKeys(listOf("backspace")); onTapFeedback() }
-                MacroKeyButton("全选", Modifier.weight(1f)) { onSendKeys(listOf("ctrl", "a")); onTapFeedback() }
-                MacroKeyButton("切窗口", Modifier.weight(1.1f)) { onSendKeys(listOf("alt", "tab")); onTapFeedback() }
+                MacroKeyButton("Win+Tab", Modifier.weight(1.25f), highlight = true) { onSendKeys(listOf("win", "tab")); onTapFeedback() }
+                MacroKeyButton("Alt+Tab", Modifier.weight(1.15f)) { onSendKeys(listOf("alt", "tab")); onTapFeedback() }
                 MacroKeyButton("Ctrl+↵", Modifier.weight(1.1f)) { onSendKeys(listOf("ctrl", "enter")); onTapFeedback() }
             }
 

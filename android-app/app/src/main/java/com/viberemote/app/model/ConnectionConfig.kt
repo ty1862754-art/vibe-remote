@@ -41,6 +41,7 @@ data class ConnectionConfig(
 
 enum class VolumeUpAction(val label: String, val keys: List<String>) {
     ENTER("Enter 发送", listOf("enter")),
+    WIN_TAB("Win+Tab 任务视图", listOf("win", "tab")),
     UNDO("Ctrl+Z 撤销", listOf("ctrl", "z")),
     TAB("Tab 补全", listOf("tab")),
     ESC("Esc 取消", listOf("esc")),

@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.journeyapps.barcodescanner.ScanContract
@@ -256,8 +257,12 @@ fun ConnectDialog(
                             ) {
                                 Text(
                                     text = act.label.substringBefore(" "),
-                                    fontSize = 11.sp,
-                                    modifier = Modifier.padding(vertical = 7.dp, horizontal = 4.dp),
+                                    fontSize = 10.sp,
+                                    maxLines = 1,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 7.dp, horizontal = 2.dp),
                                     color = TextPrimary,
                                 )
                             }
