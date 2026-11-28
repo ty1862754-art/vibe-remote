@@ -1,7 +1,9 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-if exist "VibeRemoteServer.exe" (
+if exist "VibeRemote.exe" (
+    powershell -Command "Start-Process -FilePath '%~dp0VibeRemote.exe' -Verb RunAs"
+) else if exist "VibeRemoteServer.exe" (
     powershell -Command "Start-Process -FilePath '%~dp0VibeRemoteServer.exe' -Verb RunAs"
 ) else (
     powershell -Command "Start-Process -FilePath '%~dp0启动服务端.bat' -Verb RunAs"

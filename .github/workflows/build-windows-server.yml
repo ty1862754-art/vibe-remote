@@ -35,17 +35,20 @@ jobs:
         working-directory: pc-server
         run: uv run pytest -v
 
-      - name: Bundle portable Windows executable with PyInstaller
+      - name: Bundle portable Windows desktop app with PyInstaller
         working-directory: pc-server
         run: |
-          uv run pyinstaller --noconfirm --onedir --console `
-            --name VibeRemoteServer `
+          uv run pyinstaller --noconfirm --onedir --windowed `
+            --name VibeRemote `
+            --icon vibe_server/viberemote.ico `
             --add-data "vibe_server/web_debug.html;vibe_server" `
+            --add-data "vibe_server/viberemote.ico;vibe_server" `
             --collect-all sherpa_onnx `
             --collect-all sherpa_onnx_core `
             --collect-all qrcode `
             --collect-all pystray `
             --collect-all PIL `
+            --collect-all customtkinter `
             --hidden-import pystray._win32 `
             --hidden-import uvicorn.logging `
             --hidden-import uvicorn.loops.auto `
@@ -58,10 +61,10 @@ jobs:
       - name: Package portable ZIP
         working-directory: pc-server
         run: |
-          Copy-Item config.example.toml dist/VibeRemoteServer/
-          Copy-Item 放行防火墙.bat dist/VibeRemoteServer/
-          Copy-Item 以管理员启动.bat dist/VibeRemoteServer/
-          Compress-Archive -Path dist/VibeRemoteServer/* -DestinationPath VibeRemote-Windows-Portable.zip -Force
+          Copy-Item config.example.toml dist/VibeRemote/
+          Copy-Item 放行防火墙.bat dist/VibeRemote/
+          Copy-Item 以管理员启动.bat dist/VibeRemote/
+          Compress-Archive -Path dist/VibeRemote/* -DestinationPath VibeRemote-Windows-Portable.zip -Force
 
       - name: Upload Windows Portable Artifact
         uses: actions/upload-artifact@v4

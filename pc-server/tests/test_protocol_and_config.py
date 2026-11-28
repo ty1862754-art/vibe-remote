@@ -209,3 +209,24 @@ def test_websocket_edit_mode_does_not_paste() -> None:
             assert pasted_calls == []
 
 
+def test_save_and_reload_config(tmp_path) -> None:
+    from vibe_server.config import load_config, save_config
+
+    cfg = AppConfig()
+    cfg.server.token = "888999"
+    cfg.update.github_token = "ghp_test_token"
+    cfg.asr.hotwords = {"测试词": "TestWord", "巴格": "bug"}
+    cfg.llm_polish.enabled = True
+    cfg.llm_polish.model = "deepseek-chat"
+
+    target = tmp_path / "config.toml"
+    save_config(cfg, target)
+    reloaded = load_config(target)
+
+    assert reloaded.server.token == "888999"
+    assert reloaded.update.github_token == "ghp_test_token"
+    assert reloaded.asr.hotwords["测试词"] == "TestWord"
+    assert reloaded.llm_polish.enabled is True
+    assert reloaded.llm_polish.model == "deepseek-chat"
+
+

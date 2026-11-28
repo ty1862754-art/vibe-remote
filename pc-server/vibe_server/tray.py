@@ -144,12 +144,14 @@ class SystemTrayController:
         display_endpoint: str,
         on_quit: Callable[[], None],
         on_check_update: Callable[[], None] | None = None,
+        on_show_window: Callable[[], None] | None = None,
     ) -> None:
         self.enabled = enabled and IS_WINDOWS
         self.pair_url = pair_url
         self.display_endpoint = display_endpoint
         self.on_quit = on_quit
         self.on_check_update = on_check_update
+        self.on_show_window = on_show_window
         self._icon = None
         self._thread: threading.Thread | None = None
 
@@ -173,6 +175,10 @@ class SystemTrayController:
         except Exception as exc:
             logger.warning("无法启动系统托盘图标 (pystray 不可用): %s", exc)
             return
+
+        def open_window(icon, item) -> None:
+            if self.on_show_window is not None:
+                self.on_show_window()
 
         def open_pair(icon, item) -> None:
             webbrowser.open(self.pair_url)
@@ -200,19 +206,27 @@ class SystemTrayController:
         menu_items = [
             pystray.MenuItem(f"VibeRemote ({self.display_endpoint}){admin_tag}", None, enabled=False),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("打开扫码配对页", open_pair, default=True),
+        ]
+        if self.on_show_window is not None:
+            menu_items.append(pystray.MenuItem("打开主界面", open_window, default=True))
+            menu_items.append(pystray.MenuItem("在浏览器打开扫码页", open_pair))
+        else:
+            menu_items.append(pystray.MenuItem("打开扫码配对页", open_pair, default=True))
+            menu_items.append(
+                pystray.MenuItem(
+                    "显示控制台窗口",
+                    toggle_console,
+                    checked=lambda item: is_console_visible(),
+                )
+            )
+        menu_items.extend([
             pystray.MenuItem("检查更新 (GitHub Release)", handle_check_update),
-            pystray.MenuItem(
-                "显示控制台窗口",
-                toggle_console,
-                checked=lambda item: is_console_visible(),
-            ),
             pystray.MenuItem(
                 "开机自动启动",
                 toggle_autostart,
                 checked=lambda item: is_autostart_enabled(),
             ),
-        ]
+        ])
         if not is_admin():
             menu_items.append(pystray.MenuItem("以管理员权限重启（控制所有窗口）", handle_elevate))
         menu_items.extend([

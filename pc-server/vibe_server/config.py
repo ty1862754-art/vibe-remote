@@ -185,6 +185,62 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     return cfg
 
 
+def _toml_str(val: str) -> str:
+    escaped = val.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    return f'"{escaped}"'
+
+
+def save_config(cfg: AppConfig, config_path: Path | None = None) -> Path:
+    """Persist AppConfig cleanly to config.toml."""
+    path = config_path or DEFAULT_CONFIG_PATH
+    lines = [
+        "# VibeRemote 自动保存的配置文件",
+        "",
+        "[server]",
+        f"host = {_toml_str(cfg.server.host)}",
+        f"ws_port = {cfg.server.ws_port}",
+        f"udp_port = {cfg.server.udp_port}",
+        f"token = {_toml_str(cfg.server.token)}",
+        f"enable_overlay = {'true' if cfg.server.enable_overlay else 'false'}",
+        f"enable_tray = {'true' if cfg.server.enable_tray else 'false'}",
+        f"start_minimized = {'true' if cfg.server.start_minimized else 'false'}",
+        "",
+        "[update]",
+        f"github_repo = {_toml_str(cfg.update.github_repo)}",
+        f"github_token = {_toml_str(cfg.update.github_token)}",
+        "",
+        "[input]",
+        f"mouse_sensitivity = {cfg.input.mouse_sensitivity}",
+        f"scroll_sensitivity = {cfg.input.scroll_sensitivity}",
+        f"clipboard_restore_delay_ms = {cfg.input.clipboard_restore_delay_ms}",
+        "",
+        "[asr]",
+        f"model_dir = {_toml_str(cfg.asr.model_dir)}",
+        f"model_url = {_toml_str(cfg.asr.model_url)}",
+        f"num_threads = {cfg.asr.num_threads}",
+        f"language = {_toml_str(cfg.asr.language)}",
+        f"use_itn = {'true' if cfg.asr.use_itn else 'false'}",
+        "",
+        "[asr.hotwords]",
+    ]
+    for k, v in cfg.asr.hotwords.items():
+        if k.strip():
+            lines.append(f"{_toml_str(k.strip())} = {_toml_str(v.strip())}")
+    lines.extend([
+        "",
+        "[llm_polish]",
+        f"enabled = {'true' if cfg.llm_polish.enabled else 'false'}",
+        f"base_url = {_toml_str(cfg.llm_polish.base_url)}",
+        f"api_key = {_toml_str(cfg.llm_polish.api_key)}",
+        f"model = {_toml_str(cfg.llm_polish.model)}",
+        f"timeout_seconds = {cfg.llm_polish.timeout_seconds}",
+        f"system_prompt = {_toml_str(cfg.llm_polish.system_prompt)}",
+        "",
+    ])
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
 def apply_hotwords(text: str, hotwords: dict[str, str]) -> str:
     """Apply case-insensitive hotword replacements sorted by descending key length."""
     if not text or not hotwords:
