@@ -6,7 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -62,6 +61,8 @@ fun MainScreen(
     config: ConnectionConfig,
     status: ServerStatus,
     isRecording: Boolean,
+    waitingEditTranscript: Boolean,
+    pendingEditText: String?,
     stealthMode: Boolean,
     onToggleStealth: () -> Unit,
     onToggleAutoEnter: () -> Unit,
@@ -75,17 +76,25 @@ fun MainScreen(
     onScroll: (Float, Float) -> Unit,
     onClick: (String, String) -> Unit,
     onSendKeys: (List<String>) -> Unit,
-    onSendText: (String) -> Unit,
+    onSendText: (String, Boolean) -> Unit,
+    onRequestEditText: (String) -> Unit,
+    onDismissEditText: () -> Unit,
     onStartRecording: () -> Unit,
     onStopRecording: () -> Unit,
+    onStopRecordingForEdit: () -> Unit,
+    onCancelRecording: () -> Unit,
     onTapFeedback: () -> Unit,
 ) {
     var directInput by remember { mutableStateOf("") }
     var showDirectInput by remember { mutableStateOf(false) }
     var showHistoryDialog by remember { mutableStateOf(false) }
+    var gestureZone by remember { mutableStateOf(VoiceGestureZone.SEND) }
 
     val startRecState by rememberUpdatedState(onStartRecording)
     val stopRecState by rememberUpdatedState(onStopRecording)
+    val stopEditState by rememberUpdatedState(onStopRecordingForEdit)
+    val cancelRecState by rememberUpdatedState(onCancelRecording)
+    val tapFeedbackState by rememberUpdatedState(onTapFeedback)
     val toggleStealthState by rememberUpdatedState(onToggleStealth)
 
     val dotColor = when (status.connectionState) {
@@ -203,7 +212,12 @@ fun MainScreen(
                             fontSize = 12.sp,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    val txt = status.lastTranscript.ifBlank { status.history.firstOrNull().orEmpty() }
+                                    if (txt.isNotBlank()) onRequestEditText(txt)
+                                },
                         )
                         MiniActionPill("撤回", AccentRed) {
                             onSendKeys(listOf("ctrl", "z"))
@@ -254,7 +268,7 @@ fun MainScreen(
                     IconButton(
                         onClick = {
                             if (directInput.isNotBlank()) {
-                                onSendText(directInput)
+                                onSendText(directInput, config.autoEnter)
                                 directInput = ""
                             }
                         },
@@ -299,9 +313,9 @@ fun MainScreen(
                 else -> SurfaceElevated
             }
             val pttText = when {
-                isRecording -> "正在录音 · 松开发送到电脑"
-                status.voiceState == "transcribing" -> "正在识别并上屏..."
-                status.connectionState == ConnectionState.CONNECTED -> "按住说话  (或盲按 音量- 键)"
+                isRecording -> "松开发送 · 左上取消 · 右上编辑"
+                status.voiceState == "transcribing" -> "正在识别..."
+                status.connectionState == ConnectionState.CONNECTED -> "按住说话  (左上取消 · 右上编辑)"
                 else -> "未连接电脑 · 点右上角扫码配对"
             }
 
@@ -313,10 +327,41 @@ fun MainScreen(
                     .background(pttBg)
                     .pointerInput(Unit) {
                         awaitEachGesture {
-                            awaitFirstDown(requireUnconsumed = false)
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val startPos = down.position
+                            var currentZone = VoiceGestureZone.SEND
+                            gestureZone = currentZone
                             startRecState()
-                            waitForUpOrCancellation()
-                            stopRecState()
+
+                            try {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!change.pressed) {
+                                        break
+                                    }
+                                    val dx = change.position.x - startPos.x
+                                    val dy = change.position.y - startPos.y
+                                    val nextZone = when {
+                                        dy < -80f && dx < -30f -> VoiceGestureZone.CANCEL
+                                        dy < -80f && dx > 30f -> VoiceGestureZone.EDIT
+                                        else -> VoiceGestureZone.SEND
+                                    }
+                                    if (nextZone != currentZone) {
+                                        currentZone = nextZone
+                                        gestureZone = nextZone
+                                        tapFeedbackState()
+                                    }
+                                    change.consume()
+                                }
+                            } finally {
+                                when (currentZone) {
+                                    VoiceGestureZone.CANCEL -> cancelRecState()
+                                    VoiceGestureZone.EDIT -> stopEditState()
+                                    VoiceGestureZone.SEND -> stopRecState()
+                                }
+                                gestureZone = VoiceGestureZone.SEND
+                            }
                         }
                     },
                 contentAlignment = Alignment.Center,
@@ -328,6 +373,15 @@ fun MainScreen(
                     fontWeight = FontWeight.Bold,
                 )
             }
+        }
+
+        // WeChat-style live transcript + up-left Cancel / up-right Edit overlay
+        if ((isRecording || waitingEditTranscript) && !stealthMode) {
+            VoiceRecordingOverlay(
+                zone = gestureZone,
+                partialText = status.partialTranscript,
+                isTranscribingForEdit = waitingEditTranscript && !isRecording,
+            )
         }
 
         // Full-black OLED pseudo-sleep overlay: blocks accidental touches while keeping volume keys live
@@ -389,7 +443,7 @@ fun MainScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    onSendText(item)
+                                    onSendText(item, config.autoEnter)
                                     showHistoryDialog = false
                                 },
                         ) {
@@ -407,6 +461,18 @@ fun MainScreen(
                 TextButton(onClick = { showHistoryDialog = false }) {
                     Text("关闭")
                 }
+            },
+        )
+    }
+
+    if (pendingEditText != null) {
+        EditTranscriptDialog(
+            initialText = pendingEditText,
+            initialAutoEnter = config.autoEnter,
+            onDismiss = onDismissEditText,
+            onSend = { edited, autoEnter ->
+                onSendText(edited, autoEnter)
+                onDismissEditText()
             },
         )
     }

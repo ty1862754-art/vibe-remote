@@ -31,6 +31,8 @@ class MainActivity : ComponentActivity() {
 
     private val configState = mutableStateOf(ConnectionConfig())
     private val isRecordingState = mutableStateOf(false)
+    private val waitingEditState = mutableStateOf(false)
+    private val pendingEditTextState = mutableStateOf<String?>(null)
     private val stealthModeState = mutableStateOf(false)
     private val showConnectDialogState = mutableStateOf(false)
 
@@ -51,8 +53,22 @@ class MainActivity : ComponentActivity() {
         audioRecorder = AudioRecorder(lifecycleScope)
         client = RemoteClient(
             scope = lifecycleScope,
-            onTranscriptPasted = { haptic.successDoublePulse() },
+            onTranscriptPasted = {
+                waitingEditState.value = false
+                haptic.successDoublePulse()
+            },
+            onEditTranscript = { text ->
+                runOnUiThread {
+                    waitingEditState.value = false
+                    pendingEditTextState.value = text
+                    haptic.tick()
+                }
+            },
+            onVoiceIdle = {
+                waitingEditState.value = false
+            },
             onServerError = { msg ->
+                waitingEditState.value = false
                 haptic.errorBuzz()
                 runOnUiThread {
                     Toast.makeText(this, msg.ifBlank { "识别出错" }, Toast.LENGTH_SHORT).show()
@@ -73,6 +89,8 @@ class MainActivity : ComponentActivity() {
                 val cfg by configState
                 val serverStatus by client.status.collectAsState()
                 val isRec by isRecordingState
+                val waitingEdit by waitingEditState
+                val pendingEdit by pendingEditTextState
                 val stealth by stealthModeState
                 val showDlg by showConnectDialogState
 
@@ -80,6 +98,8 @@ class MainActivity : ComponentActivity() {
                     config = cfg,
                     status = serverStatus,
                     isRecording = isRec,
+                    waitingEditTranscript = waitingEdit,
+                    pendingEditText = pendingEdit,
                     stealthMode = stealth,
                     onToggleStealth = {
                         stealthModeState.value = !stealthModeState.value
@@ -112,12 +132,16 @@ class MainActivity : ComponentActivity() {
                     onScroll = { dx, dy -> client.sendScroll(dx, dy) },
                     onClick = { btn, act -> client.sendClick(btn, act) },
                     onSendKeys = { keys -> client.sendKeys(keys) },
-                    onSendText = { text ->
-                        client.sendText(text, configState.value.autoEnter)
+                    onSendText = { text, autoEnter ->
+                        client.sendText(text, autoEnter)
                         haptic.tick()
                     },
+                    onRequestEditText = { text -> pendingEditTextState.value = text },
+                    onDismissEditText = { pendingEditTextState.value = null },
                     onStartRecording = { startVoiceCapture() },
-                    onStopRecording = { stopVoiceCapture() },
+                    onStopRecording = { stopVoiceCapture(editMode = false) },
+                    onStopRecordingForEdit = { stopVoiceCapture(editMode = true) },
+                    onCancelRecording = { cancelVoiceCapture() },
                     onTapFeedback = { haptic.tick() },
                 )
             }
@@ -205,12 +229,26 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun stopVoiceCapture() {
+    private fun stopVoiceCapture(editMode: Boolean = false) {
         if (!isRecordingState.value) return
         isRecordingState.value = false
         audioRecorder.stop()
-        client.sendAudioEnd()
+        if (editMode) {
+            waitingEditState.value = true
+            client.sendAudioEnd("edit")
+        } else {
+            client.sendAudioEnd("send")
+        }
         haptic.recordStop()
+    }
+
+    private fun cancelVoiceCapture() {
+        if (!isRecordingState.value) return
+        isRecordingState.value = false
+        waitingEditState.value = false
+        audioRecorder.stop()
+        client.sendAudioCancel()
+        haptic.tick()
     }
 
     private fun applyBrightness(dim: Boolean) {

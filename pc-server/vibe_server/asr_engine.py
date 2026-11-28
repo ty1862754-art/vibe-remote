@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import tarfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -215,6 +216,7 @@ class SenseVoiceAsrEngine:
         self._recognizer = None
         self._ready = False
         self._load_error: str | None = None
+        self._decode_lock = threading.Lock()
 
     @property
     def is_ready(self) -> bool:
@@ -279,13 +281,14 @@ class SenseVoiceAsrEngine:
 
         chunks = split_long_audio(trimmed, sample_rate=sample_rate)
         chunk_texts: list[str] = []
-        for chunk in chunks:
-            stream = self._recognizer.create_stream()
-            stream.accept_waveform(sample_rate, chunk)
-            self._recognizer.decode_stream(stream)
-            piece = str(stream.result.text).strip()
-            if piece:
-                chunk_texts.append(piece)
+        with self._decode_lock:
+            for chunk in chunks:
+                stream = self._recognizer.create_stream()
+                stream.accept_waveform(sample_rate, chunk)
+                self._recognizer.decode_stream(stream)
+                piece = str(stream.result.text).strip()
+                if piece:
+                    chunk_texts.append(piece)
 
         raw_text = join_transcript_chunks(chunk_texts)
         final_text = apply_hotwords(raw_text, self.asr_cfg.hotwords)
@@ -305,6 +308,31 @@ class SenseVoiceAsrEngine:
             polished=polished,
             chunks=len(chunks),
         )
+
+    def transcribe_partial_pcm16(
+        self,
+        pcm_bytes: bytes,
+        sample_rate: int = 16000,
+        max_preview_sec: float = 18.0,
+    ) -> str:
+        """Fast preview transcription while the user is still holding the button."""
+        if not self._ready or self._recognizer is None:
+            return ""
+        raw_samples = pcm16_bytes_to_float32(pcm_bytes)
+        if raw_samples.size < int(sample_rate * 0.35):
+            return ""
+        max_samples = int(max_preview_sec * sample_rate)
+        if raw_samples.size > max_samples:
+            raw_samples = raw_samples[-max_samples:]
+        trimmed = trim_silence(raw_samples, sample_rate=sample_rate)
+        if trimmed.size < int(sample_rate * 0.15):
+            return ""
+        with self._decode_lock:
+            stream = self._recognizer.create_stream()
+            stream.accept_waveform(sample_rate, trimmed)
+            self._recognizer.decode_stream(stream)
+            raw_text = str(stream.result.text).strip()
+        return apply_hotwords(raw_text, self.asr_cfg.hotwords)
 
     def _polish_with_llm(self, text: str) -> str | None:
         url = f"{self.llm_cfg.base_url}/chat/completions"

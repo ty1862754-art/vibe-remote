@@ -235,6 +235,49 @@ a {{ color:#60a5fa; }}
         audio_sample_rate = 16000
         audio_auto_enter = False
         audio_polish = False
+        audio_session_id = 0
+        partial_task: asyncio.Task | None = None
+
+        async def cancel_partial_task() -> None:
+            nonlocal partial_task
+            if partial_task is not None and not partial_task.done():
+                partial_task.cancel()
+                try:
+                    await partial_task
+                except asyncio.CancelledError:
+                    pass
+            partial_task = None
+
+        async def run_partial_loop(session_id: int) -> None:
+            last_len = 0
+            last_text = ""
+            try:
+                while audio_active and session_id == audio_session_id:
+                    await asyncio.sleep(0.75)
+                    if not audio_active or session_id != audio_session_id:
+                        break
+                    cur_len = len(audio_buf)
+                    if not asr_engine.is_ready or cur_len - last_len < int(audio_sample_rate * 2 * 0.35):
+                        continue
+                    snapshot = bytes(audio_buf)
+                    last_len = cur_len
+                    preview = await asyncio.to_thread(
+                        asr_engine.transcribe_partial_pcm16,
+                        snapshot,
+                        audio_sample_rate,
+                    )
+                    if (
+                        audio_active
+                        and session_id == audio_session_id
+                        and preview
+                        and preview != last_text
+                    ):
+                        last_text = preview
+                        await ws.send_json({"type": "partial_transcript", "text": preview})
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                logger.debug("partial ASR preview skipped: %s", exc)
 
         try:
             while True:
@@ -286,6 +329,7 @@ a {{ color:#60a5fa; }}
                         await ws.send_json(
                             {
                                 "type": "transcript",
+                                "mode": "send",
                                 "raw_text": text,
                                 "final_text": text,
                                 "pasted": ok,
@@ -293,6 +337,8 @@ a {{ color:#60a5fa; }}
                             }
                         )
                 elif msg_type == "audio_start":
+                    await cancel_partial_task()
+                    audio_session_id += 1
                     audio_buf.clear()
                     audio_active = True
                     audio_sample_rate = int(data.get("sample_rate", 16000))
@@ -300,13 +346,21 @@ a {{ color:#60a5fa; }}
                     audio_polish = bool(data.get("polish", False))
                     overlay.show("recording", "🎙 正在录音...")
                     await ws.send_json({"type": "status", "state": "recording", "message": "正在录音"})
+                    partial_task = asyncio.create_task(run_partial_loop(audio_session_id))
                 elif msg_type == "audio_cancel":
-                    audio_buf.clear()
                     audio_active = False
+                    audio_session_id += 1
+                    await cancel_partial_task()
+                    audio_buf.clear()
                     overlay.hide()
-                    await ws.send_json({"type": "status", "state": "idle", "message": "已取消"})
+                    await ws.send_json({"type": "status", "state": "idle", "message": "已取消发送"})
                 elif msg_type == "audio_end":
                     audio_active = False
+                    audio_session_id += 1
+                    await cancel_partial_task()
+                    end_mode = str(data.get("mode", "send")).strip().lower()
+                    if end_mode not in ("send", "edit"):
+                        end_mode = "send"
                     pcm_payload = bytes(audio_buf)
                     audio_buf.clear()
 
@@ -349,6 +403,22 @@ a {{ color:#60a5fa; }}
                         )
                         continue
 
+                    if end_mode == "edit":
+                        overlay.show("polishing", "✏ 请在手机端编辑文字...", auto_hide_ms=1800)
+                        logger.info("ASR 完成 (%dms, 等待手机编辑): %s", res.latency_ms, res.final_text)
+                        await ws.send_json(
+                            {
+                                "type": "transcript",
+                                "mode": "edit",
+                                "raw_text": res.raw_text,
+                                "final_text": res.final_text,
+                                "pasted": False,
+                                "latency_ms": res.latency_ms,
+                                "polished": res.polished,
+                            }
+                        )
+                        continue
+
                     pasted = await asyncio.to_thread(
                         controller.paste_text, res.final_text, audio_auto_enter
                     )
@@ -362,6 +432,7 @@ a {{ color:#60a5fa; }}
                     await ws.send_json(
                         {
                             "type": "transcript",
+                            "mode": "send",
                             "raw_text": res.raw_text,
                             "final_text": res.final_text,
                             "pasted": pasted,
@@ -372,6 +443,8 @@ a {{ color:#60a5fa; }}
         except WebSocketDisconnect:
             pass
         finally:
+            audio_active = False
+            await cancel_partial_task()
             overlay.hide()
             logger.info("手机客户端已断开: %s", client_host)
 

@@ -40,6 +40,7 @@ data class ServerStatus(
     val llmPolishAvailable: Boolean = false,
     val voiceState: String = "idle", // idle, recording, transcribing, error
     val statusMessage: String = "未连接电脑",
+    val partialTranscript: String = "",
     val lastTranscript: String = "",
     val lastLatencyMs: Int = 0,
     val history: List<String> = emptyList(),
@@ -48,6 +49,8 @@ data class ServerStatus(
 class RemoteClient(
     private val scope: CoroutineScope,
     private val onTranscriptPasted: (String) -> Unit,
+    private val onEditTranscript: (String) -> Unit,
+    private val onVoiceIdle: () -> Unit,
     private val onServerError: (String) -> Unit,
 ) {
     private val okHttp = OkHttpClient.Builder()
@@ -214,19 +217,30 @@ class RemoteClient(
                 }
             }
 
+            "partial_transcript" -> {
+                val preview = obj.optString("text", "")
+                if (preview.isNotBlank()) {
+                    _status.value = _status.value.copy(partialTranscript = preview)
+                }
+            }
+
             "status" -> {
                 val state = obj.optString("state", "idle")
                 val msg = obj.optString("message", "")
                 _status.value = _status.value.copy(
                     voiceState = state,
+                    partialTranscript = if (state == "idle" || state == "error") "" else _status.value.partialTranscript,
                     statusMessage = msg.ifBlank { _status.value.statusMessage },
                 )
                 if (state == "error") {
                     onServerError(msg)
+                } else if (state == "idle") {
+                    onVoiceIdle()
                 }
             }
 
             "transcript" -> {
+                val mode = obj.optString("mode", "send")
                 val finalText = obj.optString("final_text", "")
                 val latency = obj.optInt("latency_ms", 0)
                 val updatedHistory = if (finalText.isNotBlank()) {
@@ -234,15 +248,29 @@ class RemoteClient(
                 } else {
                     _status.value.history
                 }
-                _status.value = _status.value.copy(
-                    voiceState = "idle",
-                    lastTranscript = finalText,
-                    lastLatencyMs = latency,
-                    history = updatedHistory,
-                    statusMessage = if (latency > 0) "已上屏 (${latency}ms)" else "已上屏",
-                )
-                if (finalText.isNotBlank()) {
-                    onTranscriptPasted(finalText)
+                if (mode == "edit") {
+                    _status.value = _status.value.copy(
+                        voiceState = "idle",
+                        partialTranscript = "",
+                        lastLatencyMs = latency,
+                        history = updatedHistory,
+                        statusMessage = "已识别，请编辑后发送",
+                    )
+                    if (finalText.isNotBlank()) {
+                        onEditTranscript(finalText)
+                    }
+                } else {
+                    _status.value = _status.value.copy(
+                        voiceState = "idle",
+                        partialTranscript = "",
+                        lastTranscript = finalText,
+                        lastLatencyMs = latency,
+                        history = updatedHistory,
+                        statusMessage = if (latency > 0) "已上屏 (${latency}ms)" else "已上屏",
+                    )
+                    if (finalText.isNotBlank()) {
+                        onTranscriptPasted(finalText)
+                    }
                 }
             }
         }
@@ -321,6 +349,7 @@ class RemoteClient(
     }
 
     fun sendAudioStart(sampleRate: Int = 16000, autoEnter: Boolean, polish: Boolean) {
+        _status.value = _status.value.copy(partialTranscript = "")
         sendJson(
             JSONObject()
                 .put("type", "audio_start")
@@ -334,11 +363,12 @@ class RemoteClient(
         webSocket?.send(pcmBytes.toByteString(0, pcmBytes.size))
     }
 
-    fun sendAudioEnd() {
-        sendJson(JSONObject().put("type", "audio_end"))
+    fun sendAudioEnd(mode: String = "send") {
+        sendJson(JSONObject().put("type", "audio_end").put("mode", mode))
     }
 
     fun sendAudioCancel() {
+        _status.value = _status.value.copy(partialTranscript = "", voiceState = "idle")
         sendJson(JSONObject().put("type", "audio_cancel"))
     }
 

@@ -164,3 +164,48 @@ def test_semver_comparison() -> None:
     assert is_newer_version("v1.0.0", "0.9.9") is True
 
 
+def test_websocket_edit_mode_does_not_paste() -> None:
+    cfg = AppConfig(server=ServerConfig(token="654321", enable_overlay=False, enable_tray=False))
+    app = create_app(cfg, skip_asr_load=True, start_udp=False)
+
+    class _FakeResult:
+        text = "帮我打开巴格列表"
+
+    class _FakeStream:
+        def __init__(self) -> None:
+            self.result = _FakeResult()
+
+        def accept_waveform(self, sr: int, samples: np.ndarray) -> None:
+            pass
+
+    class _FakeRecognizer:
+        def create_stream(self) -> _FakeStream:
+            return _FakeStream()
+
+        def decode_stream(self, stream: _FakeStream) -> None:
+            pass
+
+    pasted_calls: list[tuple[str, bool]] = []
+    app.state.asr_engine._recognizer = _FakeRecognizer()
+    app.state.asr_engine._ready = True
+    app.state.controller.paste_text = lambda text, auto_enter=False: (pasted_calls.append((text, auto_enter)) or True)
+
+    t = np.arange(6400, dtype=np.float32) / 16000.0
+    tone = (0.3 * np.sin(2 * np.pi * 440.0 * t) * 32767.0).astype("<i2").tobytes()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws?token=654321") as ws:
+            _ = ws.receive_json()  # hello
+            ws.send_json({"type": "audio_start", "sample_rate": 16000, "auto_enter": True})
+            _ = ws.receive_json()  # recording
+            ws.send_bytes(tone)
+            ws.send_json({"type": "audio_end", "mode": "edit"})
+            _ = ws.receive_json()  # transcribing
+            res = ws.receive_json()
+            assert res["type"] == "transcript"
+            assert res["mode"] == "edit"
+            assert res["final_text"] == "帮我打开bug列表"
+            assert res["pasted"] is False
+            assert pasted_calls == []
+
+
