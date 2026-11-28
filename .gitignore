@@ -22,6 +22,7 @@ android-app/app/build/
 android-app/*.iml
 *.keystore
 *.jks
+*.p12
 
 # OS
 .DS_Store

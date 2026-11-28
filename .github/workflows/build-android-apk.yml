@@ -32,8 +32,22 @@ jobs:
         with:
           gradle-version: '8.10.2'
 
+      - name: Decode permanent signing keystore
+        shell: bash
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            printf '%s' "$KS_B64" | base64 -d > android-app/app/viberemote-signing.p12
+            ls -lh android-app/app/viberemote-signing.p12
+          fi
+
       - name: Build Debug APK
         working-directory: android-app
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: gradle assembleDebug --no-daemon
 
       - name: Upload APK Artifact

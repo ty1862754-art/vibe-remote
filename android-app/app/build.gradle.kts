@@ -12,12 +12,37 @@ android {
         applicationId = "com.viberemote.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.4.0"
+        versionCode = 6
+        versionName = "0.4.1"
+    }
+
+    val keystoreFile = file("viberemote-signing.p12")
+    val ksPassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+    val ksAlias = System.getenv("ANDROID_KEY_ALIAS")
+    val ksKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+
+    signingConfigs {
+        if (keystoreFile.exists() && !ksPassword.isNullOrBlank() && !ksAlias.isNullOrBlank()) {
+            create("viberemote") {
+                storeFile = keystoreFile
+                storeType = "PKCS12"
+                storePassword = ksPassword
+                keyAlias = ksAlias
+                keyPassword = ksKeyPassword ?: ksPassword
+            }
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfigs.findByName("viberemote")?.let {
+                signingConfig = it
+            }
+        }
         release {
+            signingConfigs.findByName("viberemote")?.let {
+                signingConfig = it
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
